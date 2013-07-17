@@ -1,0 +1,58 @@
+#!/usr/bin/octave -qf
+
+function  out = sha256(fname)
+	sha_command = sprintf("sha256sum %s | sed 's/\\ .*//'...
+ | base64 -d", fname);
+	fid = popen(sha_command, "r");
+	out = fread(fid);
+	fclose(fid);
+endfunction
+
+arg_list = argv();
+image_filename = arg_list{1};
+message_filename = arg_list{2};
+src_image = imread(image_filename);
+
+if (length(size(src_image)) != 3)
+	error("Source is not color image!")
+endif
+
+container_size = size(src_image, 1) * size(src_image, 2);
+
+encrypt_command = sprintf("gpg -c %s", message_filename);
+system(encrypt_command);
+encrypted_filename = [message_filename '.gpg'];
+hashsum = sha256(encrypted_filename);
+fencrypted = fopen(encrypted_filename, "rb");
+encrypted_message = fread(fencrypted);
+fclose(fencrypted);
+
+if (container_size < length(hashsum) + length(encrypted_message))
+	error("Container is too small");
+endif
+
+rand_size = container_size - length(hashsum) - length(encrypted_message); 
+rand_data = rand(rand_size, 1);
+
+data2hide = [hashsum; encrypted_message; rand_data];
+
+dst_image = src_image;
+dst_image(:,:,1) = bitand(dst_image(:,:,1), 0xFC);
+dst_image(:,:,2) = bitand(dst_image(:,:,2), 0xF8);
+dst_image(:,:,3) = bitand(dst_image(:,:,3), 0xF8);
+
+cnt = 0;
+for i = 1:size(dst_image,1)
+	for j = 1:size(dst_image,2)
+		cnt = cnt + 1;
+		ch1bits = bitand(data2hide(cnt), 0x03);   %0b0000_0011
+		ch2bits = bitand(data2hide(cnt), 0x1C)/4; %0b0001_1100
+		ch3bits = bitand(data2hide(cnt), 0xE0)/32;%0b1110_0000
+		dst_image(i,j,1) = bitor(dst_image(i,j,1), ch1bits);
+		dst_image(i,j,2) = bitor(dst_image(i,j,2), ch2bits);
+		dst_image(i,j,3) = bitor(dst_image(i,j,3), ch3bits);
+	end
+end
+
+imwrite(dst_image, "out.png");
+

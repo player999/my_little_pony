@@ -1,0 +1,55 @@
+#!/usr/bin/octave -qf
+
+function  out = sha256(data)
+	[istream, ostream, pid] = popen2("sha256sum", "");
+	fwrite(istream, data);
+	fclose(istream);
+	sleep(0.001);
+	out = fread(ostream);
+	fclose(ostream);
+	out = char(out(1:min(find(out == 32))-1)');
+	waitpid (pid);
+	[istream, ostream, pid] = popen2("base64", "-d");
+	fwrite(istream, out);
+	fclose(istream);
+	sleep(0.01);
+	out = fread(ostream);
+	fclose(ostream);
+endfunction
+
+arg_list = argv();
+image_filename = arg_list{1};
+output_filename = arg_list{2};
+src_image = imread(image_filename);
+
+container_size = size(src_image, 1) * size(src_image, 2);
+container = zeros(container_size, 1);
+cnt = 0;
+for i = 1:size(src_image,1)
+	for j = 1:size(src_image,2)
+		cnt = cnt + 1;
+		ch1 = bitand(src_image(i,j,1), 0x03);
+		ch2 = bitshift(bitand(src_image(i,j,2), 0x07), 2);
+		ch3 = bitshift(bitand(src_image(i,j,3), 0x07), 5);
+		databyte = bitor(bitor(ch1, ch2), ch3);
+		container(cnt) = databyte;
+	end
+end
+display("Got container!");
+checksum = container(1:48);
+data = container(49:end);
+for i = 1:length(data)
+	chs = sha256(data(1:i));
+	if(length(chs) == length(checksum))
+		if (sum(chs == checksum) == 48)
+			found_data = data(1:i);
+			fid = fopen(output_filename, "wb");
+			fwrite(fid, found_data);
+			fclose(fid);
+			break;
+		endif
+	endif
+end
+
+decrypt_command = sprintf("gpg -o %s -d %s", output_filename, output_filename);
+system(decrypt_command);
